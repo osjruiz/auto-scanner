@@ -1,9 +1,14 @@
+import csv
 import xml.etree.ElementTree as ET
 import shlex
 import subprocess
 
 import click
 import nmap
+from rich.console import Console
+from rich.table import Table
+
+CSVFILE = 'ports.csv'
 
 
 def splitter(cmd):
@@ -45,34 +50,57 @@ def report_parser(target):
 
 
 def masscan_scanner(target, interface, ports):
+    console = Console()
     if pinger(target) is False:
-        print("Target doesn't seem to be reachable. Scan may fail.")
+        console.print("[bold red]Target doesn't seem to be reachable. Scan may fail.")
 
     rate = '1000'
 
-    print(f'[+] Starting masscan for host: {target}')
-    scan = subprocess.Popen(
-        splitter(f'masscan {target} --ports {ports} --max-rate {rate} -oX {target}-scan.xml'),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    scan.communicate()
+    with console.status(f'[bold blue]Masscan for target {target} in progress...', spinner_style='bold blue'):
+        scan = subprocess.Popen(
+            splitter(f'masscan {target} --ports {ports} --max-rate {rate} -oX {target}-scan.xml'),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        scan.communicate()
 
 
 def nmap_scanner(nmap_target):
+    console = Console()
     ports = []
 
     nm = nmap.PortScanner()
     for result in nmap_target:
         for port in nmap_target[result]:
             ports.append(port)
-    print(f'[+] nmap scan for {result}')
-    nm.scan(
-        result,
-        arguments=f"-sS -sC -sV -T4 -p{','.join(map(str, ports))} -oN {result}-scan.txt",
-    )
 
-    return nm.csv()
+    with console.status(
+        f'[bold yellow]Nmap scan for {result}. Scanning TCP ports {ports}', spinner_style='bold yellow'
+    ):
+        nm.scan(
+            result,
+            arguments=f"-sS -sC -sV -T4 -p{','.join(map(str, ports))} -oN {result}-scan.txt",
+        )
+
+
+def nmap_reporter(target):
+    table = Table(title=f'Port scan for {target}')
+
+    table.add_column('Port')
+    table.add_column('Status')
+    table.add_column('Service')
+    table.add_column('Additional info')
+
+    with open(CSVFILE, newline='') as file:
+        reader = csv.reader(
+            file,
+            delimiter=';',
+        )
+        for row in reader:
+            table.add_row(row[5], row[6], row[7], f'{row[8]} {row[10]}')
+
+    console = Console()
+    console.print(table)
 
 
 @click.command()
@@ -87,6 +115,7 @@ def main(target, interface, ports):
     masscan_scanner(target, interface, ports)
     nmap_target = report_parser(target)
     nmap_scanner(nmap_target)
+    nmap_reporter(target)
 
 
 if __name__ == '__main__':
